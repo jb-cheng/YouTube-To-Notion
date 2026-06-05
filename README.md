@@ -31,6 +31,8 @@ The app supports configuration through:
 - **`config.json`** — API keys, model preferences, provider selection, and toggle options are persisted via the UI's **Save Config** / **Load Config** buttons.
 - **`.env`** — fallback values for API keys and Notion page ID (see below).
 
+> Both files are read from the **current working directory** — the same folder you launch the app from (or where the `.exe` lives when using the PyInstaller build). Drop a `.env` file next to your `.exe` or `app.py` to set defaults.
+
 ### `config.json` fields
 
 | Field | Description |
