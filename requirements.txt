@@ -1,0 +1,8 @@
+google-generativeai>=0.8.0
+youtube-transcript-api>=0.6.0
+google-api-python-client>=2.140.0
+notion-client>=2.2.0
+python-dotenv>=1.0.0
+requests>=2.31.0
+openai>=1.50.0
+pyinstaller>=6.0.0
