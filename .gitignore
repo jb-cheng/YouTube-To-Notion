@@ -219,3 +219,6 @@ __marimo__/
 
 # App config with secrets — do not commit
 config.json
+
+/.codegraph
+AGENTS.md
