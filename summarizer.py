@@ -8,7 +8,7 @@ from google import genai
 from google.genai import types
 from openai import OpenAI
 
-from config import GEMINI_PROMPT, TRANSCRIPT_CHAR_LIMITS
+from config import PROMPT, TRANSCRIPT_CHAR_LIMITS
 from exceptions import AppError
 
 
@@ -43,7 +43,7 @@ def _summarize_gemini(
         raise AppError("Gemini API key is empty.")
 
     client = genai.Client(api_key=gemini_key)
-    prompt = GEMINI_PROMPT.format(transcript=transcript)
+    prompt = PROMPT.format(transcript=transcript)
 
     try:
         config = (
@@ -71,7 +71,7 @@ def _summarize_deepseek(transcript: str, deepseek_key: str, model_name: str) -> 
         raise AppError("DeepSeek API key is empty.")
 
     client = OpenAI(api_key=deepseek_key, base_url="https://api.deepseek.com/v1")
-    prompt = GEMINI_PROMPT.format(transcript=transcript)
+    prompt = PROMPT.format(transcript=transcript)
 
     try:
         response = client.chat.completions.create(

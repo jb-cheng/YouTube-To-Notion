@@ -19,7 +19,7 @@ from config import (
     AppConfig,
     CONFIG_PATH,
     DEFAULT_DEEPSEEK_MODELS,
-    DEFAULT_MODELS,
+    DEFAULT_GEMINI_MODELS,
     TRANSCRIPT_CHAR_LIMITS,
 )
 from exceptions import AppError, TranscriptError
@@ -482,7 +482,7 @@ class YouTubeToNotionApp(Tk):
         self.replace_var.set(cfg.replace_existing_content)
         self.gemini_grounding_var.set(cfg.gemini_use_grounding)
 
-        self._gemini_models_cache = cfg.gemini_models or list(DEFAULT_MODELS)
+        self._gemini_models_cache = cfg.gemini_models or list(DEFAULT_GEMINI_MODELS)
         self._gemini_model_cache = (
             cfg.gemini_model or self._gemini_models_cache[0]
         )
@@ -514,7 +514,7 @@ class YouTubeToNotionApp(Tk):
             gemini_models = self._gemini_models_cache
             gemini_model = self._gemini_model_cache
         else:
-            gemini_models = model_values or list(DEFAULT_MODELS)
+            gemini_models = model_values or list(DEFAULT_GEMINI_MODELS)
             gemini_model = model_name or gemini_models[0]
             deepseek_models = self._deepseek_models_cache
             deepseek_model = self._deepseek_model_cache

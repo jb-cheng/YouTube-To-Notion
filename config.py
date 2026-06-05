@@ -9,10 +9,19 @@ from pathlib import Path
 from typing import List
 
 CONFIG_PATH = Path("config.json")
-DEFAULT_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"]
-STALE_DEFAULT_MODELS = {"gemini-1.5-pro", "gemini-1.5-flash", "gemini-1.0-pro"}
+DEFAULT_GEMINI_MODELS = [
+    "gemini-3.5-flash",
+    "gemini-3.1-pro",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+]
+STALE_GEMINI_MODELS = {
+    "gemini-1.5-pro", "gemini-1.5-flash", "gemini-1.0-pro",
+    "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash",
+}
 DEFAULT_DEEPSEEK_MODELS = ["deepseek-v4-flash", "deepseek-v4-pro"]
-GEMINI_PROMPT = (
+STALE_DEEPSEEK_MODELS = {"deepseek-chat", "deepseek-reasoner"}
+PROMPT = (
     "You are a technical writer creating a Notion wiki page from a YouTube transcript. "
     "Produce a reference-style entry covering key topics, architectures, workflows, "
     "and implementation details.\n\n"
@@ -65,8 +74,8 @@ class AppConfig:
     deepseek_api_key: str = ""
     notion_api_key: str = ""
     llm_provider: str = "gemini"  # "gemini" or "deepseek"
-    gemini_model: str = DEFAULT_MODELS[0]
-    gemini_models: List[str] = field(default_factory=lambda: list(DEFAULT_MODELS))
+    gemini_model: str = DEFAULT_GEMINI_MODELS[0]
+    gemini_models: List[str] = field(default_factory=lambda: list(DEFAULT_GEMINI_MODELS))
     deepseek_model: str = DEFAULT_DEEPSEEK_MODELS[0]
     deepseek_models: List[str] = field(default_factory=lambda: list(DEFAULT_DEEPSEEK_MODELS))
     notion_page_id: str = ""
@@ -83,17 +92,20 @@ def load_config() -> AppConfig:
             raw = json.load(file)
         saved_models = raw.get("gemini_models", [])
         # Discard stale default lists from old versions so users see current models.
-        if set(saved_models) == STALE_DEFAULT_MODELS:
-            saved_models = list(DEFAULT_MODELS)
+        if set(saved_models) == STALE_GEMINI_MODELS:
+            saved_models = list(DEFAULT_GEMINI_MODELS)
+        saved_deepseek_models = raw.get("deepseek_models", [])
+        if set(saved_deepseek_models) == STALE_DEEPSEEK_MODELS:
+            saved_deepseek_models = list(DEFAULT_DEEPSEEK_MODELS)
         cfg = AppConfig(
             gemini_api_key=raw.get("gemini_api_key", ""),
             deepseek_api_key=raw.get("deepseek_api_key", ""),
             notion_api_key=raw.get("notion_api_key", ""),
             llm_provider=raw.get("llm_provider", "gemini"),
-            gemini_model=raw.get("gemini_model", DEFAULT_MODELS[0]),
-            gemini_models=saved_models or list(DEFAULT_MODELS),
+            gemini_model=raw.get("gemini_model", DEFAULT_GEMINI_MODELS[0]),
+            gemini_models=saved_models or list(DEFAULT_GEMINI_MODELS),
             deepseek_model=raw.get("deepseek_model", DEFAULT_DEEPSEEK_MODELS[0]),
-            deepseek_models=raw.get("deepseek_models", list(DEFAULT_DEEPSEEK_MODELS)),
+            deepseek_models=saved_deepseek_models or list(DEFAULT_DEEPSEEK_MODELS),
             notion_page_id=raw.get("notion_page_id", ""),
             replace_existing_content=bool(raw.get("replace_existing_content", False)),
             gemini_use_grounding=bool(raw.get("gemini_use_grounding", False)),
