@@ -112,6 +112,9 @@ def load_config() -> AppConfig:
 
 
 def save_config(cfg: AppConfig) -> None:
-    """Persist config to JSON file."""
+    """Persist config to JSON file (excludes session-only fields)."""
+    data = asdict(cfg)
+    # Notion page URL is session-only — never stored on disk.
+    data.pop("notion_page_id", None)
     with CONFIG_PATH.open("w", encoding="utf-8") as file:
-        json.dump(asdict(cfg), file, indent=2)
+        json.dump(data, file, indent=2)

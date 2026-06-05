@@ -38,24 +38,161 @@ from transcript import extract_video_id, get_transcript
 
 
 class YouTubeToNotionApp(Tk):
-    """Main Tkinter UI application."""
+    """Main Tkinter UI application. Dark editorial theme with card-based sections."""
+
+    # ── Midnight Workshop colour palette ──────────────────────────────────
+    CLR_BG = "#1A1D23"
+    CLR_SURFACE = "#22262E"
+    CLR_SURFACE_LIGHT = "#272B34"
+    CLR_BORDER = "#2E333C"
+    CLR_TEXT = "#E8E8E8"
+    CLR_TEXT_MUTED = "#8B8FA0"
+    CLR_ACCENT = "#E8B86D"
+    CLR_ACCENT_HOVER = "#F0C87A"
+    CLR_ACCENT_PRESSED = "#D4A85A"
+    CLR_INPUT_BG = "#2A2E36"
+    CLR_INPUT_FOCUS = "#333842"
+    CLR_SUCCESS = "#6BCB9D"
+    CLR_ERROR = "#E05C5C"
+    CLR_INFO = "#7AAAE0"
 
     def __init__(self) -> None:
         super().__init__()
         self.title("YouTube \u2192 LLM \u2192 Notion")
         self.geometry("900x750")
+        self.configure(bg=self.CLR_BG)
 
         load_dotenv(override=False)
         self.config_data = config.load_config()
+        self._setup_theme()
         self._build_ui()
         self.apply_config_to_ui(self.config_data)
+
+    # ------------------------------------------------------------------ #
+    #  Theme & style system
+    # ------------------------------------------------------------------ #
+
+    def _setup_theme(self) -> None:
+        """Configure ttk styles for the Midnight Workshop dark theme."""
+        style = ttk.Style()
+        style.theme_use("clam")
+
+        heading_font = ("Georgia", 10)
+        label_font = ("Segoe UI", 9)
+        bold_font = ("Segoe UI", 9, "bold")
+
+        # TFrame
+        style.configure("TFrame", background=self.CLR_BG)
+
+        # TLabel
+        style.configure(
+            "TLabel",
+            background=self.CLR_BG,
+            foreground=self.CLR_TEXT,
+            font=label_font,
+        )
+
+        # TLabelframe — card-like bordered sections
+        style.configure(
+            "Card.TLabelframe",
+            background=self.CLR_SURFACE,
+            bordercolor=self.CLR_BORDER,
+            borderwidth=1,
+            relief="solid",
+        )
+        style.configure(
+            "Card.TLabelframe.Label",
+            background=self.CLR_SURFACE,
+            foreground=self.CLR_ACCENT,
+            font=heading_font,
+        )
+
+        # TEntry
+        style.configure(
+            "Dark.TEntry",
+            fieldbackground=self.CLR_INPUT_BG,
+            foreground=self.CLR_TEXT,
+            insertcolor=self.CLR_TEXT,
+            borderwidth=1,
+            relief="solid",
+            padding=(6, 4),
+        )
+        style.map(
+            "Dark.TEntry",
+            fieldbackground=[("focus", self.CLR_INPUT_FOCUS)],
+            bordercolor=[("focus", self.CLR_ACCENT)],
+        )
+
+        # TCombobox
+        style.configure(
+            "Dark.TCombobox",
+            fieldbackground=self.CLR_INPUT_BG,
+            foreground=self.CLR_TEXT,
+            arrowcolor=self.CLR_TEXT_MUTED,
+            borderwidth=1,
+            relief="solid",
+            padding=(6, 4),
+        )
+        style.map(
+            "Dark.TCombobox",
+            fieldbackground=[("focus", self.CLR_INPUT_FOCUS)],
+            bordercolor=[("focus", self.CLR_ACCENT)],
+        )
+
+        # TButton
+        style.configure(
+            "TButton",
+            background=self.CLR_SURFACE_LIGHT,
+            foreground=self.CLR_TEXT,
+            borderwidth=1,
+            relief="solid",
+            padding=(12, 4),
+            font=label_font,
+        )
+        style.map(
+            "TButton",
+            background=[("active", "#353B45"), ("pressed", "#1E2229")],
+        )
+
+        # Accent button — prominent call-to-action
+        style.configure(
+            "Accent.TButton",
+            background=self.CLR_ACCENT,
+            foreground=self.CLR_BG,
+            borderwidth=1,
+            relief="solid",
+            padding=(16, 5),
+            font=bold_font,
+        )
+        style.map(
+            "Accent.TButton",
+            background=[
+                ("active", self.CLR_ACCENT_HOVER),
+                ("pressed", self.CLR_ACCENT_PRESSED),
+            ],
+        )
+
+        # TCheckbutton
+        style.configure(
+            "Dark.TCheckbutton",
+            background=self.CLR_BG,
+            foreground=self.CLR_TEXT,
+            font=label_font,
+        )
+        style.map("Dark.TCheckbutton", background=[("active", self.CLR_BG)])
+
+        # TSeparator (horizontal rule)
+        style.configure(
+            "Horizontal.TSeparator",
+            background=self.CLR_BORDER,
+        )
 
     # ------------------------------------------------------------------ #
     #  UI construction
     # ------------------------------------------------------------------ #
 
     def _build_ui(self) -> None:
-        self.columnconfigure(1, weight=1)
+        self.columnconfigure(0, weight=1)
 
         self.youtube_url_var = StringVar()
         self.provider_var = StringVar(value="gemini")
@@ -67,140 +204,265 @@ class YouTubeToNotionApp(Tk):
         self.replace_var = tk.BooleanVar(value=False)
         self.gemini_grounding_var = tk.BooleanVar(value=False)
 
-        row = 0
+        # ── Top bar ────────────────────────────────────────────────────────
+        top_bar = tk.Frame(self, bg=self.CLR_BG, height=36)
+        top_bar.grid(row=0, column=0, sticky="ew", padx=0, pady=0)
+        top_bar.columnconfigure(1, weight=1)
+        top_bar.grid_propagate(False)
 
-        self._add_label_entry("YouTube URL", self.youtube_url_var, row)
-        row += 1
+        tk.Label(
+            top_bar,
+            text="YouTube \u2192 LLM \u2192 Notion",
+            bg=self.CLR_BG,
+            fg=self.CLR_ACCENT,
+            font=("Bahnschrift", 13),
+        ).grid(row=0, column=0, sticky="w", padx=(16, 8), pady=6)
 
-        # --- LLM Provider dropdown ---
-        ttk.Label(self, text="LLM Provider").grid(
-            row=row, column=0, sticky="w", padx=8, pady=6
+        tk.Label(
+            top_bar,
+            text="Transcript \u00b7 Summarize \u00b7 Publish",
+            bg=self.CLR_BG,
+            fg=self.CLR_TEXT_MUTED,
+            font=("Segoe UI", 8),
+        ).grid(row=0, column=1, sticky="w", padx=(0, 8), pady=6)
+
+        # Thin decorative divider
+        tk.Frame(self, bg=self.CLR_BORDER, height=1).grid(
+            row=1, column=0, sticky="ew", padx=16, pady=(0, 6)
         )
-        provider_frame = ttk.Frame(self)
-        provider_frame.grid(row=row, column=1, sticky="ew", padx=8, pady=6)
-        provider_frame.columnconfigure(0, weight=1)
+
+        # ── Section 1: Video Input ─────────────────────────────────────────
+        input_sec = ttk.LabelFrame(
+            self,
+            text="  \u25b6  Input",
+            style="Card.TLabelframe",
+            padding=(8, 6, 8, 8),
+        )
+        input_sec.grid(row=2, column=0, sticky="ew", padx=16, pady=(4, 0))
+        input_sec.columnconfigure(1, weight=1)
+
+        ttk.Label(input_sec, text="YouTube URL").grid(
+            row=0, column=0, sticky="w", padx=4, pady=4
+        )
+        ttk.Entry(
+            input_sec,
+            textvariable=self.youtube_url_var,
+            style="Dark.TEntry",
+        ).grid(row=0, column=1, sticky="ew", padx=4, pady=4)
+
+        # ── Section 2: LLM Configuration ───────────────────────────────────
+        self.llm_sec = ttk.LabelFrame(
+            self,
+            text="  \u25b6  LLM Configuration",
+            style="Card.TLabelframe",
+            padding=(8, 6, 8, 8),
+        )
+        self.llm_sec.grid(row=3, column=0, sticky="ew", padx=16, pady=(4, 0))
+        self.llm_sec.columnconfigure(1, weight=1)
+
+        r = 0
+        # Provider dropdown
+        ttk.Label(self.llm_sec, text="Provider").grid(
+            row=r, column=0, sticky="w", padx=4, pady=4
+        )
+        prov_frame = ttk.Frame(self.llm_sec)
+        prov_frame.grid(row=r, column=1, sticky="ew", padx=4, pady=4)
+        prov_frame.columnconfigure(0, weight=1)
         self.provider_combo = ttk.Combobox(
-            provider_frame,
+            prov_frame,
             textvariable=self.provider_var,
             values=["gemini", "deepseek"],
             state="readonly",
+            style="Dark.TCombobox",
         )
         self.provider_combo.grid(row=0, column=0, sticky="ew")
         self.provider_combo.bind(
             "<<ComboboxSelected>>", self._on_provider_changed
         )
-        row += 1
+        r += 1
 
-        # --- Model dropdown ---
-        ttk.Label(self, text="Model").grid(
-            row=row, column=0, sticky="w", padx=8, pady=6
+        # Model dropdown + refresh button
+        ttk.Label(self.llm_sec, text="Model").grid(
+            row=r, column=0, sticky="w", padx=4, pady=4
         )
-        model_frame = ttk.Frame(self)
-        model_frame.grid(row=row, column=1, sticky="ew", padx=8, pady=6)
-        model_frame.columnconfigure(0, weight=1)
+        mdl_frame = ttk.Frame(self.llm_sec)
+        mdl_frame.grid(row=r, column=1, sticky="ew", padx=4, pady=4)
+        mdl_frame.columnconfigure(0, weight=1)
         self.model_combo = ttk.Combobox(
-            model_frame, textvariable=self.gemini_model_var, state="readonly"
+            mdl_frame,
+            textvariable=self.gemini_model_var,
+            state="readonly",
+            style="Dark.TCombobox",
         )
         self.model_combo.grid(row=0, column=0, sticky="ew")
         ttk.Button(
-            model_frame, text="Refresh", command=self._refresh_models
+            mdl_frame,
+            text="Refresh",
+            command=self._refresh_models,
         ).grid(row=0, column=1, padx=(6, 0))
-        row += 1
+        r += 1
 
-        # --- Google Search grounding checkbox (Gemini only) ---
-        self._grounding_row = row
+        # Google Search grounding checkbox (Gemini only)
+        self._grounding_row = r
         self._grounding_check = ttk.Checkbutton(
-            self,
-            text="Google Search grounding (fact-check with live search \u2014 Gemini only)",
+            self.llm_sec,
+            text="Google Search grounding (Gemini only)",
             variable=self.gemini_grounding_var,
+            style="Dark.TCheckbutton",
         )
-        self._grounding_check.grid(
-            row=row, column=1, sticky="w", padx=8, pady=2
-        )
-        row += 1
+        self._grounding_check.grid(row=r, column=1, sticky="w", padx=4, pady=2)
+        r += 1
 
-        # --- Gemini API key row ---
+        # Gemini API key entry
         self._gemini_key_row: List[tk.Widget] = []
-        gk_lbl = ttk.Label(self, text="Gemini API key")
-        gk_lbl.grid(row=row, column=0, sticky="w", padx=8, pady=6)
-        gk_entry = ttk.Entry(self, textvariable=self.gemini_key_var, show="*")
-        gk_entry.grid(row=row, column=1, sticky="ew", padx=8, pady=6)
+        gk_lbl = ttk.Label(self.llm_sec, text="Gemini API key")
+        gk_lbl.grid(row=r, column=0, sticky="w", padx=4, pady=4)
+        gk_entry = ttk.Entry(
+            self.llm_sec,
+            textvariable=self.gemini_key_var,
+            show="*",
+            style="Dark.TEntry",
+        )
+        gk_entry.grid(row=r, column=1, sticky="ew", padx=4, pady=4)
         self._gemini_key_row = [gk_lbl, gk_entry]
 
-        # --- DeepSeek API key row (same grid row; hidden by default) ---
+        # DeepSeek API key entry (same row, hidden by default)
         self._deepseek_key_row: List[tk.Widget] = []
-        dk_lbl = ttk.Label(self, text="DeepSeek API key")
-        dk_lbl.grid(row=row, column=0, sticky="w", padx=8, pady=6)
-        dk_entry = ttk.Entry(self, textvariable=self.deepseek_key_var, show="*")
-        dk_entry.grid(row=row, column=1, sticky="ew", padx=8, pady=6)
+        dk_lbl = ttk.Label(self.llm_sec, text="DeepSeek API key")
+        dk_lbl.grid(row=r, column=0, sticky="w", padx=4, pady=4)
+        dk_entry = ttk.Entry(
+            self.llm_sec,
+            textvariable=self.deepseek_key_var,
+            show="*",
+            style="Dark.TEntry",
+        )
+        dk_entry.grid(row=r, column=1, sticky="ew", padx=4, pady=4)
         dk_lbl.grid_remove()
         dk_entry.grid_remove()
         self._deepseek_key_row = [dk_lbl, dk_entry]
-        row += 1
+        self._key_row = r  # saved for provider-switch toggling
+        r += 1
 
-        self._add_label_entry("Notion API key", self.notion_key_var, row, masked=True)
-        row += 1
-        self._add_label_entry("Notion page URL/ID", self.notion_page_var, row)
-        row += 1
+        # ── Section 3: Notion Destination ──────────────────────────────────
+        note_sec = ttk.LabelFrame(
+            self,
+            text="  \u25b6  Notion Destination",
+            style="Card.TLabelframe",
+            padding=(8, 6, 8, 8),
+        )
+        note_sec.grid(row=4, column=0, sticky="ew", padx=16, pady=(4, 0))
+        note_sec.columnconfigure(1, weight=1)
+
+        r = 0
+        ttk.Label(note_sec, text="Notion API key").grid(
+            row=r, column=0, sticky="w", padx=4, pady=4
+        )
+        ttk.Entry(
+            note_sec,
+            textvariable=self.notion_key_var,
+            show="*",
+            style="Dark.TEntry",
+        ).grid(row=r, column=1, sticky="ew", padx=4, pady=4)
+        r += 1
+
+        ttk.Label(note_sec, text="Page URL / ID").grid(
+            row=r, column=0, sticky="w", padx=4, pady=4
+        )
+        ttk.Entry(
+            note_sec,
+            textvariable=self.notion_page_var,
+            style="Dark.TEntry",
+        ).grid(row=r, column=1, sticky="ew", padx=4, pady=4)
+        r += 1
 
         ttk.Checkbutton(
-            self,
-            text="Replace existing Notion page content",
+            note_sec,
+            text="Replace existing page content",
             variable=self.replace_var,
-        ).grid(row=row, column=1, sticky="w", padx=8, pady=6)
-        row += 1
+            style="Dark.TCheckbutton",
+        ).grid(row=r, column=1, sticky="w", padx=4, pady=4)
+        r += 1
 
-        button_frame = ttk.Frame(self)
-        button_frame.grid(
-            row=row, column=0, columnspan=2, sticky="w", padx=8, pady=8
+        # Action buttons
+        btn_frame = ttk.Frame(note_sec)
+        btn_frame.grid(
+            row=r, column=0, columnspan=2, sticky="w", padx=4, pady=(8, 4)
         )
 
         self.run_button = ttk.Button(
-            button_frame, text="Run", command=self.run_pipeline
+            btn_frame,
+            text="Run Pipeline",
+            style="Accent.TButton",
+            command=self.run_pipeline,
         )
-        self.run_button.pack(side="left", padx=4)
+        self.run_button.pack(side="left", padx=(0, 6))
 
         ttk.Button(
-            button_frame, text="Save Config", command=self.save_config_from_ui
+            btn_frame,
+            text="Save Config",
+            command=self.save_config_from_ui,
         ).pack(side="left", padx=4)
         ttk.Button(
-            button_frame, text="Load Config", command=self.reload_config
+            btn_frame,
+            text="Load Config",
+            command=self.reload_config,
         ).pack(side="left", padx=4)
 
-        row += 1
-        ttk.Label(self, text="Progress / Logs").grid(
-            row=row, column=0, sticky="nw", padx=8, pady=(8, 0)
-        )
-        row += 1
+        # ── Log area ───────────────────────────────────────────────────────
+        tk.Label(
+            self,
+            text="  Progress & Logs",
+            bg=self.CLR_BG,
+            fg=self.CLR_TEXT_MUTED,
+            font=("Segoe UI", 8),
+            anchor="w",
+        ).grid(row=5, column=0, sticky="ew", padx=(20, 0), pady=(10, 2))
 
-        self.log_text = scrolledtext.ScrolledText(self, wrap="word", height=22)
+        self.log_text = scrolledtext.ScrolledText(
+            self,
+            wrap="word",
+            height=20,
+            bg=self.CLR_SURFACE,
+            fg=self.CLR_TEXT_MUTED,
+            insertbackground=self.CLR_ACCENT,
+            font=("Consolas", 9),
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground=self.CLR_BORDER,
+            highlightcolor=self.CLR_ACCENT,
+            relief="flat",
+            padx=8,
+            pady=8,
+        )
         self.log_text.grid(
-            row=row, column=0, columnspan=2, sticky="nsew", padx=8, pady=8
+            row=6, column=0, sticky="nsew", padx=16, pady=(2, 12)
         )
-        self.rowconfigure(row, weight=1)
+        self.rowconfigure(6, weight=1)
 
-    def _add_label_entry(
-        self,
-        label: str,
-        var: StringVar,
-        row: int,
-        masked: bool = False,
-    ) -> None:
-        ttk.Label(self, text=label).grid(
-            row=row, column=0, sticky="w", padx=8, pady=6
-        )
-        entry = ttk.Entry(self, textvariable=var, show="*" if masked else "")
-        entry.grid(row=row, column=1, sticky="ew", padx=8, pady=6)
+        # Colour tags for log levels
+        self.log_text.tag_config("error", foreground=self.CLR_ERROR)
+        self.log_text.tag_config("success", foreground=self.CLR_SUCCESS)
+        self.log_text.tag_config("info", foreground=self.CLR_INFO)
 
     # ------------------------------------------------------------------ #
-    #  Logging (thread-safe)
+    #  Logging (thread-safe, with colour-coded levels)
     # ------------------------------------------------------------------ #
 
     def log(self, message: str) -> None:
-        """Thread-safe logging into the text area."""
+        """Thread-safe logging into the text area with auto-colouring."""
 
         def _append() -> None:
-            self.log_text.insert("end", f"{message}\n")
+            tag = ""
+            if message.startswith("ERROR:"):
+                tag = "error"
+            elif message.startswith("Done.") or "successfully" in message.lower():
+                tag = "success"
+            elif any(
+                kw in message
+                for kw in ("Refreshing", "Loaded", "Fetching", "Extracting")
+            ):
+                tag = "info"
+            self.log_text.insert("end", f"{message}\n", tag)
             self.log_text.see("end")
 
         self.after(0, _append)
@@ -321,14 +583,15 @@ class YouTubeToNotionApp(Tk):
                 )
 
         provider = self.provider_var.get()
+        r = self._key_row  # row inside llm_sec where both key fields live
         if provider == "deepseek":
             for w in self._gemini_key_row:
                 w.grid_remove()
             self._deepseek_key_row[0].grid(
-                row=3, column=0, sticky="w", padx=8, pady=6
+                row=r, column=0, sticky="w", padx=4, pady=4
             )
             self._deepseek_key_row[1].grid(
-                row=3, column=1, sticky="ew", padx=8, pady=6
+                row=r, column=1, sticky="ew", padx=4, pady=4
             )
             self._grounding_check.grid_remove()
             models = self._deepseek_models_cache
@@ -338,16 +601,16 @@ class YouTubeToNotionApp(Tk):
             for w in self._deepseek_key_row:
                 w.grid_remove()
             self._gemini_key_row[0].grid(
-                row=3, column=0, sticky="w", padx=8, pady=6
+                row=r, column=0, sticky="w", padx=4, pady=4
             )
             self._gemini_key_row[1].grid(
-                row=3, column=1, sticky="ew", padx=8, pady=6
+                row=r, column=1, sticky="ew", padx=4, pady=4
             )
             self._grounding_check.grid(
                 row=self._grounding_row,
                 column=1,
                 sticky="w",
-                padx=8,
+                padx=4,
                 pady=2,
             )
             models = self._gemini_models_cache
