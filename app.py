@@ -12,11 +12,9 @@ from pathlib import Path
 from typing import Iterable, List
 from urllib.parse import parse_qs, urlparse
 
-import google.generativeai as genai
+from google import genai
 import requests
 from dotenv import load_dotenv
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
 from notion_client import Client
 from notion_client.errors import APIResponseError
 from openai import OpenAI
@@ -29,17 +27,44 @@ CONFIG_PATH = Path("config.json")
 DEFAULT_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"]
 STALE_DEFAULT_MODELS = {"gemini-1.5-pro", "gemini-1.5-flash", "gemini-1.0-pro"}
 GEMINI_PROMPT = (
-    "You are a technical writer creating a Notion-ready page about a YouTube video. "
-    "Given the transcript, produce a clear page that describes what the video is about. "
-    "Do not write a brief recap-style summary; instead, organize the main topics and ideas "
-    "so a reader understands the video's content and discussion flow. "
-    "Use # for major sections and ## for subsections. Focus on technical concepts, "
-    "architecture, workflows, and key implementation details. Use bullet points where "
-    "helpful. Use fenced code blocks for code-like content. Use LaTeX for math when "
-    "appropriate ($...$ inline, $$...$$ for display). Output only markdown.\n\n"
+    "You are a technical writer creating a Notion wiki page from a YouTube transcript. "
+    "Produce a reference-style entry covering key topics, architectures, workflows, "
+    "and implementation details.\n\n"
+    "## Structure\n"
+    "- Use # / ## / ### for section hierarchy. Do NOT start with a top-level heading — "
+    "open with a brief introductory paragraph (no heading), then begin sections with #.\n"
+    "- Keep the intro paragraph high-level. Save specifics, results, and technical detail "
+    "for the body sections.\n\n"
+    "## Writing style\n"
+    "- Full paragraph prose like a Wikipedia article. "
+    "Bullet points only for true lists (benchmark results, components, etc.) — never to "
+    "describe concepts or explain ideas.\n"
+    "- Assume the reader has general technical knowledge. When a known concept is mentioned "
+    "(e.g. residual connections, attention, backpropagation), reference it naturally "
+    "without explaining it — *unless* the video itself spends time explaining the motivation "
+    "behind it (e.g. why residual connections were needed for vanishing gradients). "
+    "In that case, summarize the problem being solved as background.\n"
+    "- Capture the substance and structure of what the video presents, not the speaker's "
+    "narrative flow.\n"
+    "- Include implementation depth: describe mechanisms, algorithms, and design choices "
+    "so the reader understands how things actually work, not just what they are.\n\n"
+    "## Headings\n"
+    "- Write headings as raw topic names — no framing labels. Never prefix with "
+    "\"Background:\", \"Introduction:\", \"Overview:\", \"Conclusion:\", "
+    "\"Key Concepts:\", \"Details:\", or similar.\n"
+    "- When the video discusses a well-known external concept (ResNets, transformers, etc.), "
+    "don't make the concept the heading itself. Instead describe what the video says about it, "
+    "e.g. \"## Problems with ResNets\" or \"## Attention in this context\".\n\n"
+    "## Formatting\n"
+    "- Code-like content: fenced code blocks.\n"
+    "- Display math: `$$...$$` (LaTeX, one expression per block).\n"
+    "- Inline math: `$...$` (LaTeX, within a sentence).\n"
+    "- Use LaTeX for equations, formulas, and any mathematical notation present in the video.\n"
+    "- Image placeholders: `[Image: brief description of what the image should show]` — use these at natural points in the text where a diagram, screenshot, or illustration would aid understanding. The user will replace them with actual images later.\n"
+    "- Output only markdown.\n\n"
     "Transcript:\n{transcript}"
 )
-TRANSCRIPT_CHAR_LIMITS = {"gemini": 150_000, "deepseek": 50_000}
+TRANSCRIPT_CHAR_LIMITS = {"gemini": 150_000, "deepseek": 200_000}
 
 
 def truncate_transcript(transcript: str, limit: int) -> tuple[str, bool]:
@@ -57,8 +82,7 @@ class TranscriptError(AppError):
     """Raised when transcript retrieval fails."""
 
 
-DEFAULT_DEEPSEEK_MODELS = ["deepseek-chat"]
-
+DEFAULT_DEEPSEEK_MODELS = ["deepseek-v4-flash", "deepseek-v4-pro"]
 
 @dataclass
 class AppConfig:
@@ -67,7 +91,6 @@ class AppConfig:
     gemini_api_key: str = ""
     deepseek_api_key: str = ""
     notion_api_key: str = ""
-    youtube_api_key: str = ""
     llm_provider: str = "gemini"  # "gemini" or "deepseek"
     gemini_model: str = DEFAULT_MODELS[0]
     gemini_models: List[str] = field(default_factory=lambda: list(DEFAULT_MODELS))
@@ -84,8 +107,76 @@ def split_text_chunks(text: str, chunk_size: int = 1800) -> List[str]:
     return [text[i : i + chunk_size] for i in range(0, len(text), chunk_size)]
 
 
+# Regex for inline markdown patterns — order matters so ** beats * and $$ beats $.
+_INLINE_PATTERN = re.compile(
+    r"\*\*(.+?)\*\*"         # 1 – bold
+    r"|\*(.+?)\*"            # 2 – italic
+    r"|`(.+?)`"              # 3 – inline code
+    r"|\$\$(.+?)\$\$"        # 4 – display math inline (edge case)
+    r"|\$(.+?)\$"            # 5 – inline math
+    r"|~~(.+?)~~"            # 6 – strikethrough
+)
+
+
+def parse_inline_markdown(text: str) -> List[dict]:
+    """Parse inline markdown into Notion rich text objects with annotations.
+
+    Supports **bold**, *italic*, ``code``, $math$, ~~strikethrough~~.
+    """
+    if not text:
+        return [{"type": "text", "text": {"content": " "}}]
+
+    results: List[dict] = []
+    last_end = 0
+
+    for match in _INLINE_PATTERN.finditer(text):
+        # Plain text segment before this match
+        if match.start() > last_end:
+            for chunk in split_text_chunks(text[last_end : match.start()]):
+                results.append({"type": "text", "text": {"content": chunk}})
+
+        # Determine which group matched and build the rich-text object
+        if match.group(1):   # bold
+            ann = {"bold": True}
+            content = match.group(1)
+        elif match.group(2):  # italic
+            ann = {"italic": True}
+            content = match.group(2)
+        elif match.group(3):  # inline code
+            ann = {"code": True}
+            content = match.group(3)
+        elif match.group(4):  # display math inline ($$…$$ mid-line)
+            results.append(
+                {"type": "equation", "equation": {"expression": match.group(4).strip()}}
+            )
+            last_end = match.end()
+            continue
+        elif match.group(5):  # inline math ($…$)
+            results.append(
+                {"type": "equation", "equation": {"expression": match.group(5).strip()}}
+            )
+            last_end = match.end()
+            continue
+        elif match.group(6):  # strikethrough
+            ann = {"strikethrough": True}
+            content = match.group(6)
+
+        for chunk in split_text_chunks(content):
+            results.append(
+                {"type": "text", "text": {"content": chunk}, "annotations": ann}
+            )
+        last_end = match.end()
+
+    # Trailing plain text
+    if last_end < len(text):
+        for chunk in split_text_chunks(text[last_end:]):
+            results.append({"type": "text", "text": {"content": chunk}})
+
+    return results if results else [{"type": "text", "text": {"content": text.strip() or " "}}]
+
+
 def text_rich_objects(text: str) -> List[dict]:
-    """Build Notion rich text objects from plain text."""
+    """Build plain (unannotated) Notion rich text objects — used for code blocks."""
     return [
         {"type": "text", "text": {"content": chunk}}
         for chunk in split_text_chunks(text.strip() or " ")
@@ -96,16 +187,16 @@ def paragraph_block(text: str) -> dict:
     return {
         "object": "block",
         "type": "paragraph",
-        "paragraph": {"rich_text": text_rich_objects(text)},
+        "paragraph": {"rich_text": parse_inline_markdown(text)},
     }
 
 
 def heading_block(level: int, text: str) -> dict:
-    block_type = "heading_1" if level == 1 else "heading_2"
+    block_type = {1: "heading_1", 2: "heading_2", 3: "heading_3"}.get(level, "heading_2")
     return {
         "object": "block",
         "type": block_type,
-        block_type: {"rich_text": text_rich_objects(text)},
+        block_type: {"rich_text": parse_inline_markdown(text)},
     }
 
 
@@ -113,7 +204,7 @@ def bullet_block(text: str) -> dict:
     return {
         "object": "block",
         "type": "bulleted_list_item",
-        "bulleted_list_item": {"rich_text": text_rich_objects(text)},
+        "bulleted_list_item": {"rich_text": parse_inline_markdown(text)},
     }
 
 
@@ -128,12 +219,23 @@ def code_block(text: str) -> dict:
     }
 
 
+def equation_block(expression: str) -> dict:
+    """Notion equation block for display math."""
+    return {
+        "object": "block",
+        "type": "equation",
+        "equation": {"expression": expression.strip()},
+    }
+
+
 def markdown_to_notion_blocks(markdown_text: str) -> List[dict]:
     """Convert simplified markdown into Notion block payloads."""
     blocks: List[dict] = []
     paragraph_lines: List[str] = []
     code_lines: List[str] = []
+    math_lines: List[str] = []
     in_code_block = False
+    in_math_block = False
 
     def flush_paragraph() -> None:
         nonlocal paragraph_lines
@@ -159,6 +261,20 @@ def markdown_to_notion_blocks(markdown_text: str) -> List[dict]:
             code_lines.append(line)
             continue
 
+        if stripped == "$$":
+            flush_paragraph()
+            if in_math_block:
+                blocks.append(equation_block("\n".join(math_lines).strip()))
+                math_lines = []
+                in_math_block = False
+            else:
+                in_math_block = True
+            continue
+
+        if in_math_block:
+            math_lines.append(line)
+            continue
+
         if not stripped:
             flush_paragraph()
             continue
@@ -173,6 +289,11 @@ def markdown_to_notion_blocks(markdown_text: str) -> List[dict]:
             blocks.append(heading_block(2, stripped[3:].strip()))
             continue
 
+        if stripped.startswith("### "):
+            flush_paragraph()
+            blocks.append(heading_block(3, stripped[4:].strip()))
+            continue
+
         if stripped.startswith("- ") or stripped.startswith("* "):
             flush_paragraph()
             blocks.append(bullet_block(stripped[2:].strip()))
@@ -183,6 +304,8 @@ def markdown_to_notion_blocks(markdown_text: str) -> List[dict]:
     flush_paragraph()
     if in_code_block and code_lines:
         blocks.append(code_block("\n".join(code_lines).strip()))
+    if in_math_block and math_lines:
+        blocks.append(equation_block("\n".join(math_lines).strip()))
 
     return blocks
 
@@ -234,87 +357,19 @@ def extract_video_id(youtube_url: str) -> str:
     raise AppError("Could not extract a valid YouTube video ID from the provided URL.")
 
 
-def srt_to_plain_text(srt_text: str) -> str:
-    """Convert SRT caption content into readable plain text."""
-    lines = []
-    for line in srt_text.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        if stripped.isdigit():
-            continue
-        if "-->" in stripped:
-            continue
-        lines.append(stripped)
-    return "\n".join(lines)
-
-
-def get_transcript_from_youtube_data_api(video_id: str, api_key: str) -> str:
-    """Try transcript retrieval using YouTube Data API v3 caption endpoint.
-
-    Note: caption downloads usually require OAuth ownership of the video. This API-key
-    attempt is still performed first (per requirement) and can fail for many videos.
-    """
-    if not api_key:
-        raise TranscriptError("YouTube Data API key is empty.")
-
-    youtube = build("youtube", "v3", developerKey=api_key, cache_discovery=False)
-
+def get_transcript(video_id: str) -> tuple[str, str]:
+    """Get transcript using youtube-transcript-api."""
     try:
-        response = youtube.captions().list(part="id,snippet", videoId=video_id).execute()
-    except HttpError as exc:
-        raise TranscriptError(f"YouTube captions listing failed: {exc}") from exc
-
-    items = response.get("items", [])
-    if not items:
-        raise TranscriptError("No caption tracks available from YouTube Data API.")
-
-    def rank_caption(item: dict) -> tuple:
-        lang = item.get("snippet", {}).get("language", "")
-        is_en = lang.startswith("en")
-        return (0 if is_en else 1, lang)
-
-    caption_item = sorted(items, key=rank_caption)[0]
-    caption_id = caption_item.get("id")
-    if not caption_id:
-        raise TranscriptError("Caption track was returned without an ID.")
-
-    # Captions download usually requires OAuth ownership. We still attempt as requested,
-    # then rely on youtube-transcript-api fallback when this fails.
-    download_url = f"https://www.googleapis.com/youtube/v3/captions/{caption_id}"
-    params = {"tfmt": "srt", "key": api_key}
-    response = requests.get(download_url, params=params, timeout=30)
-
-    if response.status_code != 200:
-        raise TranscriptError(
-            "YouTube Data API caption download failed "
-            f"(HTTP {response.status_code}): {response.text[:200]}"
-        )
-
-    text = srt_to_plain_text(response.text)
-    if not text.strip():
-        raise TranscriptError("YouTube Data API returned an empty transcript.")
-    return text
-
-
-def get_transcript_with_fallback(video_id: str, youtube_api_key: str) -> tuple[str, str]:
-    """Get transcript and source name using API-first + fallback behavior."""
-    try:
-        transcript = get_transcript_from_youtube_data_api(video_id, youtube_api_key)
-        return transcript, "YouTube Data API"
-    except Exception as first_error:
-        try:
-            transcript_data = YouTubeTranscriptApi.get_transcript(video_id)
-            transcript = "\n".join(item.get("text", "") for item in transcript_data).strip()
-            if not transcript:
-                raise TranscriptError("Fallback transcript returned empty text.")
-            return transcript, "youtube-transcript-api fallback"
-        except Exception as fallback_error:
-            raise TranscriptError(
-                "Transcript extraction failed with both methods. "
-                f"YouTube API error: {first_error}. "
-                f"Fallback error: {fallback_error}"
-            ) from fallback_error
+        api = YouTubeTranscriptApi()
+        transcript_data = api.fetch(video_id)
+        transcript = "\n".join(item.text for item in transcript_data).strip()
+        if not transcript:
+            raise TranscriptError("Transcript returned empty text.")
+        return transcript, "youtube-transcript-api"
+    except TranscriptError:
+        raise
+    except Exception as exc:
+        raise TranscriptError(f"Transcript retrieval failed: {exc}") from exc
 
 
 def summarize(
@@ -337,13 +392,12 @@ def _summarize_gemini(transcript: str, gemini_key: str, model_name: str) -> str:
     if not gemini_key:
         raise AppError("Gemini API key is empty.")
 
-    genai.configure(api_key=gemini_key)
-    model = genai.GenerativeModel(model_name)
+    client = genai.Client(api_key=gemini_key)
     prompt = GEMINI_PROMPT.format(transcript=transcript)
 
     try:
-        response = model.generate_content(prompt)
-    except Exception as exc:  # Gemini SDK can raise several runtime exceptions.
+        response = client.models.generate_content(model=model_name, contents=prompt)
+    except Exception as exc:
         raise AppError(f"Gemini summarization failed: {exc}") from exc
 
     summary = (getattr(response, "text", None) or "").strip()
@@ -384,14 +438,13 @@ def fetch_gemini_models(gemini_key: str) -> List[str]:
     if not key:
         raise AppError("Please enter a Gemini API key before refreshing models.")
 
-    genai.configure(api_key=key)
+    client = genai.Client(api_key=key)
     model_names: List[str] = []
-    for model in genai.list_models():
-        methods = getattr(model, "supported_generation_methods", []) or []
-        if "generateContent" not in methods:
+    for model in client.models.list():
+        if "generateContent" not in (model.supported_actions or []):
             continue
 
-        name = (getattr(model, "name", "") or "").removeprefix("models/").strip()
+        name = (model.name or "").removeprefix("models/").strip()
         if name.startswith("gemini"):
             model_names.append(name)
 
@@ -449,7 +502,6 @@ class YouTubeToNotionApp(Tk):
         self.gemini_key_var = StringVar()
         self.deepseek_key_var = StringVar()
         self.notion_key_var = StringVar()
-        self.youtube_key_var = StringVar()
         self.notion_page_var = StringVar()
         self.replace_var = tk.BooleanVar(value=False)
 
@@ -503,8 +555,6 @@ class YouTubeToNotionApp(Tk):
         row += 1
 
         self._add_label_entry("Notion API key", self.notion_key_var, row, masked=True)
-        row += 1
-        self._add_label_entry("YouTube Data API key", self.youtube_key_var, row, masked=True)
         row += 1
         self._add_label_entry("Notion page URL/ID", self.notion_page_var, row)
         row += 1
@@ -574,7 +624,6 @@ class YouTubeToNotionApp(Tk):
                 gemini_api_key=raw.get("gemini_api_key", ""),
                 deepseek_api_key=raw.get("deepseek_api_key", ""),
                 notion_api_key=raw.get("notion_api_key", ""),
-                youtube_api_key=raw.get("youtube_api_key", ""),
                 llm_provider=raw.get("llm_provider", "gemini"),
                 gemini_model=raw.get("gemini_model", DEFAULT_MODELS[0]),
                 gemini_models=saved_models or list(DEFAULT_MODELS),
@@ -588,7 +637,6 @@ class YouTubeToNotionApp(Tk):
         cfg.gemini_api_key = cfg.gemini_api_key or os.getenv("GEMINI_API_KEY", "")
         cfg.deepseek_api_key = cfg.deepseek_api_key or os.getenv("DEEPSEEK_API_KEY", "")
         cfg.notion_api_key = cfg.notion_api_key or os.getenv("NOTION_API_KEY", "")
-        cfg.youtube_api_key = cfg.youtube_api_key or os.getenv("YOUTUBE_API_KEY", "")
         cfg.notion_page_id = cfg.notion_page_id or os.getenv("NOTION_PAGE_ID", "")
 
         if cfg.gemini_model not in cfg.gemini_models:
@@ -603,7 +651,6 @@ class YouTubeToNotionApp(Tk):
         self.gemini_key_var.set(cfg.gemini_api_key)
         self.deepseek_key_var.set(cfg.deepseek_api_key)
         self.notion_key_var.set(cfg.notion_api_key)
-        self.youtube_key_var.set(cfg.youtube_api_key)
         self.notion_page_var.set(cfg.notion_page_id)
         self.replace_var.set(cfg.replace_existing_content)
 
@@ -640,7 +687,6 @@ class YouTubeToNotionApp(Tk):
             gemini_api_key=self.gemini_key_var.get().strip(),
             deepseek_api_key=self.deepseek_key_var.get().strip(),
             notion_api_key=self.notion_key_var.get().strip(),
-            youtube_api_key=self.youtube_key_var.get().strip(),
             llm_provider=provider,
             gemini_model=gemini_model,
             gemini_models=gemini_models,
@@ -786,8 +832,8 @@ class YouTubeToNotionApp(Tk):
             video_id = extract_video_id(youtube_url)
             self.log(f"Video ID: {video_id}")
 
-            self.log("Fetching transcript (YouTube Data API first, then fallback)...")
-            transcript, source = get_transcript_with_fallback(video_id, cfg.youtube_api_key)
+            self.log("Fetching transcript...")
+            transcript, source = get_transcript(video_id)
             self.log(f"Transcript source: {source}")
 
             char_limit = TRANSCRIPT_CHAR_LIMITS.get(cfg.llm_provider, 100_000)
@@ -828,7 +874,7 @@ class YouTubeToNotionApp(Tk):
             self.log("Done. Page content written to Notion successfully.")
             self.after(0, lambda: messagebox.showinfo("Success", "Page content sent to Notion."))
 
-        except (AppError, TranscriptError, APIResponseError, HttpError) as exc:
+        except (AppError, TranscriptError, APIResponseError) as exc:
             fail(str(exc))
         except requests.RequestException as exc:
             fail(f"Network error: {exc}")
