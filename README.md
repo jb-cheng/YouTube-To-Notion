@@ -1,11 +1,11 @@
-# YouTube-To-Notion
+# YouTube → LLM → Notion
 
 A Tkinter desktop app that:
 
 1. Accepts a YouTube URL.
-2. Extracts transcript via YouTube Data API v3 first, then falls back to `youtube-transcript-api`.
-3. Sends transcript to Gemini to generate technical markdown page content describing what the video discusses.
-4. Writes the generated page content into a Notion page as blocks.
+2. Extracts the transcript via `youtube-transcript-api`.
+3. Sends the transcript to an LLM (Gemini or DeepSeek) to generate technical markdown wiki-style content.
+4. Writes the generated markdown into a Notion page as blocks.
 
 ## Requirements
 
@@ -28,53 +28,64 @@ python app.py
 
 The app supports configuration through:
 
-- `config.json` (saved/loaded via UI buttons)
-- `.env` (fallback values)
+- **`config.json`** — API keys, model preferences, provider selection, and toggle options are persisted via the UI's **Save Config** / **Load Config** buttons.
+- **`.env`** — fallback values for API keys and Notion page ID (see below).
 
-Supported values:
+### `config.json` fields
 
-- `gemini_api_key`
-- `notion_api_key`
-- `youtube_api_key`
-- `gemini_model`
-- `gemini_models`
-- `notion_page_id`
-- `replace_existing_content`
+| Field | Description |
+|---|---|
+| `gemini_api_key` | Gemini API key |
+| `deepseek_api_key` | DeepSeek API key |
+| `notion_api_key` | Notion internal integration token |
+| `llm_provider` | `"gemini"` or `"deepseek"` |
+| `gemini_model` | Active Gemini model name |
+| `gemini_models` | Cached list of available Gemini models |
+| `deepseek_model` | Active DeepSeek model name |
+| `deepseek_models` | Cached list of available DeepSeek models |
+| `replace_existing_content` | Whether to clear the Notion page before writing |
+| `gemini_use_grounding` | Enable Google Search grounding (Gemini only) |
 
-Optional `.env` keys:
+> **Note:** The Notion page URL/ID is **session-only** — it's entered in the UI each time and never saved to `config.json`.
 
-- `GEMINI_API_KEY`
-- `NOTION_API_KEY`
-- `YOUTUBE_API_KEY`
-- `NOTION_PAGE_ID`
+### `.env` fallback keys
+
+```
+GEMINI_API_KEY=...
+DEEPSEEK_API_KEY=...
+NOTION_API_KEY=...
+NOTION_PAGE_ID=...
+```
 
 ### Getting API keys
 
-- **YouTube Data API v3 key**: Google Cloud Console → Enable YouTube Data API v3 → Create API key.
-- **Gemini API key**: Google AI Studio / Google Cloud Generative AI credentials.
-- **Notion API key**: Notion Integrations → Internal Integration Token. Share the target page with the integration.
+- **Gemini API key**: [Google AI Studio](https://aistudio.google.com/apikey) — no billing required for the free tier.
+- **DeepSeek API key**: [DeepSeek Platform](https://platform.deepseek.com/) → API keys → create a new key.
+- **Notion API key**: [Notion Integrations](https://www.notion.so/my-integrations) → New integration → copy the Internal Integration Token. Then share your target page with the integration.
 
 ## UI Features
 
 - YouTube URL input
-- Gemini model dropdown (refreshed from Gemini API)
-- Masked key inputs
-- Notion page URL/ID input
-- Replace existing content toggle
-- Run button with live logs
-- Refresh button to fetch available Gemini models for your API key
-- Save Config / Load Config buttons
-- Error popups with friendly messages
+- **LLM Provider** dropdown — switch between Gemini and DeepSeek
+- **Model** dropdown (refreshable from the Gemini API for Gemini; built-in list for DeepSeek)
+- Google Search grounding checkbox (Gemini only — fact-checks with live search)
+- Masked API key inputs for Gemini, DeepSeek, and Notion
+- Notion page URL/ID input (session-only — not saved to disk)
+- **Replace existing content** toggle
+- **Run** button with live scrollable log output
+- **Save Config** / **Load Config** buttons
+- Error dialogs with friendly messages
 
 ## Notion Markdown support
 
-Gemini markdown is converted into Notion blocks with support for:
+LLM-generated markdown is converted into Notion blocks with support for:
 
-- `#` → heading 1
-- `##` → heading 2
-- paragraph text
+- `#` / `##` / `###` → headings 1–3
+- paragraph text with inline formatting (**bold**, *italic*, `code`, $math$, ~~strikethrough~~)
 - bullet lists (`-` / `*`)
-- fenced code blocks (```)
+- fenced code blocks (```` ``` ````)
+- display math (`$$...$$`) and inline math (`$...$`)
+- image placeholders (`[Image: description]` — passed through as plain text for manual replacement)
 
 ## Build `.exe` with PyInstaller
 
